@@ -1,24 +1,52 @@
-# ArXiv 논문 크롤러 with Review System
+# ArXiv 논문 크롤러
 
-ArXiv에서 최신 논문을 가져와 AI 리뷰를 생성하고 백엔드 API를 통해 데이터베이스에 저장하는 Python 스크립트입니다.
+ArXiv에서 최신 논문을 가져와 Reviewer로 적절성을 판단하고, AI 서버를 통해 요약 및 분석한 후, 백엔드 API를 통해 데이터베이스에 저장하는 Python 스크립트입니다.
 
-## 주요 기능
+## 프로젝트 구조
 
-### 1. 논문 크롤링
-- **1분마다 자동 실행**: 최신 논문을 지속적으로 모니터링
-- **모든 분야 크롤링**: ArXiv의 모든 카테고리에서 최신 논문 수집
-- **중복 방지**: 이미 처리된 논문은 자동으로 건너뜀 (`processed_papers.json`에 저장)
+```
+scholub/crawler/
+├── main.py                      # 메인 실행 파일 ⭐
+├── config.py                    # 환경변수 및 설정 관리
+├── models.py                    # 데이터 타입 정의
+├── arxiv_fetcher.py            # ArXiv 논문 가져오기
+├── pdf_handler.py              # PDF 다운로드 및 텍스트 추출
+├── paper_reviewer_handler.py   # Reviewer 로직
+├── ai_service.py               # AI 서버 통신
+├── backend_service.py          # 백엔드 서버 통신
+├── reviewer.py                 # Reviewer 클래스
+├── prompts/                    # Reviewer 프롬프트 파일들
+│   └── paper_review/
+├── thumbnail.webp              # 기본 썸네일 이미지
+├── mockdata.json              # 목데이터 (필요시)
+├── requirements.txt           # Python 패키지 의존성
+├── env.example.txt            # 환경변수 예시
+├── README.md                  # 프로젝트 문서
+└── old_arxiv_crawler.py       # 이전 버전 (백업용)
+```
 
-### 2. AI 논문 리뷰 생성
-- **paper-reviewer 통합**: paper-reviewer 프로젝트의 리뷰 방식을 그대로 채택
-- **PDF 텍스트 추출**: 논문 PDF에서 텍스트를 자동으로 추출하여 리뷰 생성
-- **마크다운 JSON 파싱**: OpenAI 응답이 마크다운 형태의 JSON인 경우도 안전하게 처리
-- **리플렉션 기반 리뷰**: 초기 리뷰 생성 후 3회의 리플렉션을 통해 리뷰 품질 향상
-- **앙상블 리뷰**: 여러 리뷰를 종합하여 최종 리뷰 생성
+## 논문 처리 흐름
 
-### 3. 백엔드 연동
-- 논문 메타데이터와 리뷰를 함께 백엔드 API로 전송
-- PDF 파일 자동 업로드
+```
+1. ArXiv에서 논문 메타데이터 가져오기
+   ↓
+2. PDF 다운로드
+   ↓
+3. Reviewer로 논문 적절성 판단 ⭐
+   ↓ (적절한 논문만)
+4. Backend Server에서 UserActivity 요청
+   ↓
+5. AI Server로 PDF + UserActivity 전송
+   ↓
+6. AI Server Response 가공
+   - summary, translatedSummary
+   - tableOfContents, contents
+   - hashtags
+   - interestedUsers (userId 배열)
+   - thumbnail (base64 → bytes)
+   ↓
+7. Backend Server로 전송
+```
 
 ## 설치
 
@@ -28,144 +56,224 @@ pip install -r requirements.txt
 
 ## 환경 변수 설정
 
-프로젝트 루트에 `.env` 파일을 생성하고 다음 내용을 추가하세요:
+프로젝트 루트에 `.env` 파일을 생성하세요. `env.example.txt`를 참고하세요.
+
+### 필수 환경변수
 
 ```env
-# 백엔드 API URL (선택사항, 기본값: http://localhost:8000/api/crawler/papers)
-API_BASE_URL=http://localhost:8000/api/crawler/papers
-
-# 크롤러 인증용 시크릿 키 (필수)
+# 크롤러 인증용 시크릿 키 (백엔드에서 발급)
 CRAWLER_SECRET_KEY=your-secret-key-here
 
-# OpenAI API 키 (필수 - 리뷰 생성에 사용)
+# OpenAI API 키 (Reviewer 사용)
 OPENAI_API_KEY=your-openai-api-key-here
 ```
 
-또는 환경변수로 직접 설정할 수도 있습니다:
+### 선택적 환경변수 (기본값 있음)
 
-```bash
-export CRAWLER_SECRET_KEY="your-secret-key"
-export OPENAI_API_KEY="your-openai-api-key"
-```
+```env
+# 서버 URL
+BACKEND_SERVER_URL=http://localhost:8000
+AI_SERVER_URL=https://med-role-alternatives-sol.trycloudflare.com
 
-Windows의 경우:
-```cmd
-set CRAWLER_SECRET_KEY=your-secret-key
-set OPENAI_API_KEY=your-openai-api-key
+# Reviewer 설정
+REVIEWER_MODEL=gpt-4o-mini          # OpenAI 모델
+REVIEWER_REFLECTION=1                # Reflection 횟수 (빠른 판단)
+
+# 크롤링 설정
+ARXIV_QUERY=cat:cs.AI OR cat:cs.LG OR cat:cs.CV
+MAX_RESULTS_LATEST=100               # 최신 논문 크롤링 시 가져올 개수
+MAX_RESULTS_SCHEDULED=10             # 스케줄링 크롤링 시 가져올 개수
+
+# PDF 처리
+MAX_PDF_TEXT_LENGTH=100000           # PDF 텍스트 최대 길이
+
+# 타임아웃 (초 단위)
+PDF_DOWNLOAD_TIMEOUT=30
+AI_SERVER_TIMEOUT=120
+BACKEND_TIMEOUT=60
+
+# Rate Limiting
+REQUEST_DELAY=1.0                    # 요청 간 딜레이 (초)
 ```
 
 ## 사용법
 
-### 리뷰 기능이 포함된 크롤러 실행
+### 1. 최신 100개 논문 크롤링
 
 ```bash
-python arxiv_crawler_with_review.py
+python main.py
 ```
 
-이 스크립트는:
-1. 1분마다 ArXiv에서 최신 논문을 검색
-2. 새로운 논문에 대해 PDF를 다운로드하고 텍스트 추출
-3. AI를 사용하여 논문 리뷰 생성
-4. 논문 메타데이터와 리뷰를 백엔드 API로 전송
-5. 처리된 논문 ID를 저장하여 중복 처리 방지
+### 2. 스케줄링용 크롤링 (Python)
 
-### 기존 크롤러 (리뷰 없이)
+```python
+from main import scheduled_crawl
+
+# 최신 10개 논문 크롤링
+scheduled_crawl()
+```
+
+### 3. 스케줄링용 크롤링 (Cron)
 
 ```bash
-python arxiv_crawler.py
+# 매 시간마다 실행
+0 * * * * cd /path/to/scholub/crawler && python -c "from main import scheduled_crawl; scheduled_crawl()"
 ```
 
-## 파일 구조
+## 모듈 설명
 
-```
-arxiv-crawling/
-├── arxiv_crawler.py              # 기존 크롤러 (리뷰 없음)
-├── arxiv_crawler_with_review.py   # 리뷰 기능이 포함된 크롤러
-├── reviewer.py                    # Reviewer 클래스 (paper-reviewer에서 통합)
-├── prompts/
-│   └── paper_review/             # 리뷰 생성용 프롬프트 파일들
-│       ├── reviewer_system.txt
-│       ├── paper_review.txt
-│       ├── neurips_reviewer_guidelines.txt
-│       ├── few_shot_review_examples.txt
-│       ├── paper_reflection.txt
-│       └── ensemble_system.txt
-├── processed_papers.json         # 처리된 논문 ID 저장 (자동 생성)
-└── requirements.txt
-```
+### `config.py`
+- 환경변수 로드 및 관리
+- API 엔드포인트 URL 구성
+- 필수 환경변수 검증
 
-## 주요 기능 상세
+### `models.py`
+- 데이터 타입 정의 (TypedDict)
+- `PaperData`, `AIResponse`, `ReviewResult` 등
 
-### 마크다운 JSON 파싱
+### `arxiv_fetcher.py`
+- ArXiv API 통신
+- 논문 검색 및 메타데이터 변환
+- 카테고리 코드 → 사람이 읽을 수 있는 이름으로 변환
 
-OpenAI의 응답이 다음과 같은 형태일 수 있습니다:
-- 일반 JSON: `{"key": "value"}`
-- 마크다운 코드 블록: ` ```json {"key": "value"} ``` `
-- 코드 블록 없이 JSON: `{...}`
+### `pdf_handler.py`
+- PDF 다운로드
+- PDF 텍스트 추출 (PyPDF2)
+- 기본 썸네일 로드
 
-`parse_markdown_json()` 함수가 이러한 모든 경우를 처리합니다.
+### `paper_reviewer_handler.py`
+- Reviewer 초기화
+- 논문 적절성 판단
+- rating 기반 필터링 (기본: rating ≥ 5)
 
-### PDF 텍스트 추출
+### `ai_service.py`
+- AI 서버 통신
+- AI 응답 처리 및 가공
+  - thumbnail base64 디코딩
+  - interestedUsers에서 userId 추출
+  - tableOfContents + contents → content 통합
 
-- PyPDF2를 사용하여 PDF에서 텍스트 추출
-- 텍스트가 너무 길 경우 (100,000자 이상) 앞부분만 사용하여 토큰 제한 고려
-- 추출 실패 시 빈 문자열 반환 (리뷰 없이 논문만 업로드)
+### `backend_service.py`
+- 백엔드 서버 통신
+- 사용자 활동 정보 가져오기
+- 논문 데이터 업로드
 
-### 리뷰 생성 프로세스
-
-1. **초기 리뷰 생성**: 논문 텍스트를 기반으로 첫 번째 리뷰 생성
-2. **리플렉션 (3회)**: 리뷰를 개선하기 위해 3회의 리플렉션 수행
-3. **앙상블**: 모든 리뷰를 종합하여 최종 리뷰 생성
-4. **리뷰 형식**: NeurIPS 리뷰 가이드라인을 따르는 JSON 형식
+### `main.py`
+- 메인 실행 로직
+- 논문 처리 파이프라인 조율
+- 통계 출력
 
 ## API 엔드포인트
 
-- **URL**: `POST http://localhost:8000/api/crawler/papers`
-- **인증**: Bearer 토큰 (CRAWLER_SECRET_KEY 환경변수)
-- **Content-Type**: multipart/form-data
-- **요청 본문**:
-  - `paperId`: 논문 ID
-  - `title`: 제목
-  - `categories`: 카테고리 (JSON 문자열)
-  - `authors`: 저자 목록 (JSON 문자열)
-  - `summary`: 초록
-  - `doi`: DOI
-  - `url`: ArXiv URL
-  - `issuedAt`: 발행일
-  - `content`: 리뷰 포함 메타데이터 (JSON 문자열)
-  - `pdf`: PDF 파일
+### 1. 사용자 활동 정보 가져오기
+```
+GET {BACKEND_SERVER_URL}/api/crawler/users/activities
+Authorization: Bearer {CRAWLER_SECRET_KEY}
+```
+
+### 2. AI 서버로 논문 요약 요청
+```
+POST {AI_SERVER_URL}/api/summarize-paper
+Content-Type: multipart/form-data
+
+file: [PDF 파일]
+activity: [JSON.stringify(활동 정보)]
+```
+
+**응답 예시:**
+```json
+{
+  "summary": "Paper Summary",
+  "translatedSummary": "논문 요약",
+  "thumbnail": "base64 encoded image",
+  "tableOfContents": [...],
+  "contents": [...],
+  "hashtags": [...],
+  "interestedUsers": [{"userId": "abc", ...}]
+}
+```
+
+### 3. 백엔드로 논문 업로드
+```
+POST {BACKEND_SERVER_URL}/api/crawler/papers
+Authorization: Bearer {CRAWLER_SECRET_KEY}
+Content-Type: multipart/form-data
+
+paperId, title, categories, authors, summary, translatedSummary,
+doi, url, issuedAt, content, hashtags, interestedUsers,
+pdf (file), thumbnail (file)
+```
 
 ## 설정 변경
 
-`arxiv_crawler_with_review.py`의 `fetch_latest_arxiv_papers()` 함수에서 다음 설정을 변경할 수 있습니다:
+### Reviewer 적절성 판단 기준
+`paper_reviewer_handler.py`의 `review_paper()` 함수:
+```python
+# 기본: rating 5 이상
+is_appropriate = rating >= 5
 
-- `max_results`: 가져올 최대 논문 수 (기본값: 50)
-- `sort_by`: 정렬 기준 (기본값: SubmittedDate)
-- `sort_order`: 정렬 순서 (기본값: Descending)
+# 더 엄격하게: rating 7 이상
+is_appropriate = rating >= 7
+```
 
-`process_new_papers()` 함수에서:
-- 크롤링 주기: `main()` 함수의 `await asyncio.sleep(60)` 값 변경 (기본값: 60초 = 1분)
+### Reflection 횟수 조정
+`.env` 파일:
+```env
+# 빠른 판단 (기본)
+REVIEWER_REFLECTION=1
+
+# 정확한 판단
+REVIEWER_REFLECTION=3
+```
+
+### 크롤링 개수 조정
+`.env` 파일:
+```env
+# 최신 논문 크롤링 개수
+MAX_RESULTS_LATEST=50
+
+# 스케줄링 크롤링 개수
+MAX_RESULTS_SCHEDULED=5
+```
 
 ## 주의사항
 
-- **Rate Limiting**: ArXiv API와 OpenAI API 사용 시 Rate Limiting을 위해 요청 간 딜레이가 추가됩니다.
-- **토큰 사용량**: 리뷰 생성 시 OpenAI API 토큰이 소모됩니다. 비용을 고려하여 사용하세요.
-- **PDF 다운로드**: 일부 논문의 PDF 다운로드가 실패할 수 있습니다. 이 경우 리뷰 없이 메타데이터만 업로드됩니다.
-- **처리 시간**: 리뷰 생성에 시간이 걸리므로 논문당 약 1-2분 정도 소요될 수 있습니다.
-- **중복 방지**: `processed_papers.json` 파일을 삭제하면 모든 논문을 다시 처리합니다.
-- **에러 처리**: 네트워크 오류나 API 오류 발생 시 해당 논문은 건너뛰고 계속 진행됩니다.
+- **필수 환경변수**: `CRAWLER_SECRET_KEY`, `OPENAI_API_KEY` 반드시 설정
+- **Rate Limiting**: ArXiv API 사용 시 요청 간 딜레이 적용
+- **AI 처리 시간**: 논문당 약 1-2분 소요
+- **Reviewer**: OpenAI API 토큰 소모 (비용 고려)
+- **PDF 다운로드**: 일부 논문 다운로드 실패 가능
 
 ## 문제 해결
 
-### OpenAI API 키 오류
+### 환경변수 오류
+```
+ValueError: CRAWLER_SECRET_KEY 환경변수가 설정되지 않았습니다.
+```
+→ `.env` 파일에 `CRAWLER_SECRET_KEY`를 추가하세요.
+
+### Reviewer 초기화 실패
 ```
 ValueError: OPENAI_API_KEY environment variable is not set.
 ```
-→ `.env` 파일에 `OPENAI_API_KEY`를 추가하거나 환경변수로 설정하세요.
+→ `.env` 파일에 `OPENAI_API_KEY`를 추가하세요.
 
-### PDF 텍스트 추출 실패
-→ PyPDF2가 일부 PDF 형식을 지원하지 않을 수 있습니다. 이 경우 리뷰 없이 논문만 업로드됩니다.
+### PDF 다운로드 실패
+```
+PDF 다운로드 실패: ...
+```
+→ 네트워크 문제 또는 ArXiv 서버 문제. 잠시 후 다시 시도하세요.
 
-### JSON 파싱 오류
-→ `parse_markdown_json()` 함수가 자동으로 처리하지만, 여전히 실패하는 경우 리뷰 생성이 건너뛰어집니다.
+### AI 서버 타임아웃
+```
+실패 (네트워크 오류: timeout)
+```
+→ `.env`에서 `AI_SERVER_TIMEOUT` 값을 증가시키세요 (예: 180).
 
+## 개발자 정보
+
+이 프로젝트는 ArXiv 논문을 자동으로 수집하고, Reviewer로 적절성을 판단하며, AI를 활용하여 분석한 후, 백엔드 시스템과 연동하여 사용자에게 맞춤형 논문 추천을 제공하는 것을 목표로 합니다.
+
+## 라이센스
+
+MIT License
