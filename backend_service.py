@@ -148,9 +148,16 @@ def upload_paper_to_backend(
                 logger.debug(f"  content: {len(ai_response['content'])} 문자")
             
             if 'hashtags' in ai_response:
-                data['hashtags'] = ai_response['hashtags']
-                hashtag_count = len(json.loads(ai_response['hashtags']))
-                logger.debug(f"  hashtags: {hashtag_count}개")
+                # hashtags는 string 배열의 JSON 문자열 형태로 저장되어 있음
+                hashtags_array = json.loads(ai_response['hashtags'])
+                hashtag_count = len(hashtags_array)
+                
+                # multipart/form-data에서 배열을 전달하기 위해 hashtags[] 형태로 전송
+                # requests는 리스트를 자동으로 hashtags[0], hashtags[1] 형태로 변환
+                data['hashtags'] = hashtags_array
+                
+                logger.debug(f"  hashtags: {hashtag_count}개 (string 배열로 전송)")
+                logger.debug(f"  hashtags 샘플: {hashtags_array[:5]}")
             
             if 'interestedUsers' in ai_response:
                 data['interestedUsers'] = ai_response['interestedUsers']

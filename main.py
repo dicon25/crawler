@@ -42,11 +42,14 @@ async def process_single_paper(
         # ArXiv 결과를 PaperData 형식으로 변환
         paper_data = transform_arxiv_to_paper_data(paper)
         
+        # 진행률 계산
+        progress_percent = (index / total) * 100
+        
         title_display = paper_data['title'][:50] + "..." if len(paper_data['title']) > 50 else paper_data['title']
-        print(f"[{index}/{total}] 처리 중: \"{title_display}\"")
+        print(f"[{index}/{total}] ({progress_percent:.1f}%) 처리 중: \"{title_display}\"")
         
         logger.info("=" * 80)
-        logger.info(f"논문 처리 시작 [{index}/{total}]")
+        logger.info(f"논문 처리 시작 [{index}/{total}] ({progress_percent:.1f}%)")
         logger.info(f"Title: {paper_data['title']}")
         logger.info(f"Paper ID: {paper_data.get('paperId', 'N/A')}")
         logger.info("=" * 80)
@@ -173,7 +176,14 @@ async def process_papers(papers, mode: str = "latest") -> CrawlStats:
         else:
             fail_count += 1
         
-        logger.info(f"진행 상황: {success_count + fail_count}/{len(papers)} (성공: {success_count}, 실패: {fail_count})")
+        # 진행률 계산
+        current_progress = success_count + fail_count
+        progress_percent = (current_progress / len(papers)) * 100
+        
+        logger.info(
+            f"진행 상황: {current_progress}/{len(papers)} ({progress_percent:.1f}%) "
+            f"(성공: {success_count}, 실패: {fail_count})"
+        )
         
         # Rate limiting: 요청 간 딜레이 추가
         if index < len(papers):
@@ -181,10 +191,15 @@ async def process_papers(papers, mode: str = "latest") -> CrawlStats:
     
     process_elapsed = time.time() - process_start_time
     
+    # 최종 진행률 및 성공률 계산
+    final_progress_percent = 100.0  # 모든 논문 처리 완료
+    success_rate = (success_count / len(papers)) * 100 if len(papers) > 0 else 0.0
+    
     logger.info("=" * 80)
     logger.info("논문 처리 완료")
-    logger.info(f"성공: {success_count}/{len(papers)}")
-    logger.info(f"실패: {fail_count}/{len(papers)}")
+    logger.info(f"진행률: {final_progress_percent:.1f}% ({len(papers)}/{len(papers)})")
+    logger.info(f"성공: {success_count}/{len(papers)} ({success_rate:.1f}%)")
+    logger.info(f"실패: {fail_count}/{len(papers)} ({(100-success_rate):.1f}%)")
     logger.info(f"총 소요 시간: {process_elapsed:.2f}초 ({process_elapsed/60:.2f}분)")
     logger.info(f"논문당 평균 소요 시간: {process_elapsed/len(papers):.2f}초")
     logger.info("=" * 80)
@@ -218,18 +233,22 @@ async def main_async():
         elapsed = time.time() - start_time
         
         # 3. 결과 통계 출력
+        success_rate = (results['success'] / results['total']) * 100 if results['total'] > 0 else 0.0
+        
         print("\n" + "=" * 60)
         print("크롤링 완료!")
         print("=" * 60)
-        print(f"성공: {results['success']}개")
-        print(f"실패: {results['fail']}개")
+        print(f"진행률: 100.0% ({results['total']}/{results['total']})")
+        print(f"성공: {results['success']}개 ({success_rate:.1f}%)")
+        print(f"실패: {results['fail']}개 ({(100-success_rate):.1f}%)")
         print(f"전체: {results['total']}개")
         print(f"총 소요 시간: {elapsed:.2f}초 ({elapsed/60:.2f}분)")
         print("=" * 60)
         
         log_section(logger, "크롤링 완료")
-        logger.info(f"성공: {results['success']}개")
-        logger.info(f"실패: {results['fail']}개")
+        logger.info(f"진행률: 100.0% ({results['total']}/{results['total']})")
+        logger.info(f"성공: {results['success']}개 ({success_rate:.1f}%)")
+        logger.info(f"실패: {results['fail']}개 ({(100-success_rate):.1f}%)")
         logger.info(f"전체: {results['total']}개")
         logger.info(f"총 소요 시간: {elapsed:.2f}초 ({elapsed/60:.2f}분)")
         
@@ -267,18 +286,22 @@ async def scheduled_crawl_async():
         elapsed = time.time() - start_time
         
         # 3. 결과 통계 출력
+        success_rate = (results['success'] / results['total']) * 100 if results['total'] > 0 else 0.0
+        
         print("\n" + "=" * 60)
         print("스케줄링 크롤링 완료!")
         print("=" * 60)
-        print(f"성공: {results['success']}개")
-        print(f"실패: {results['fail']}개")
+        print(f"진행률: 100.0% ({results['total']}/{results['total']})")
+        print(f"성공: {results['success']}개 ({success_rate:.1f}%)")
+        print(f"실패: {results['fail']}개 ({(100-success_rate):.1f}%)")
         print(f"전체: {results['total']}개")
         print(f"총 소요 시간: {elapsed:.2f}초 ({elapsed/60:.2f}분)")
         print("=" * 60)
         
         log_section(logger, "스케줄링 크롤링 완료")
-        logger.info(f"성공: {results['success']}개")
-        logger.info(f"실패: {results['fail']}개")
+        logger.info(f"진행률: 100.0% ({results['total']}/{results['total']})")
+        logger.info(f"성공: {results['success']}개 ({success_rate:.1f}%)")
+        logger.info(f"실패: {results['fail']}개 ({(100-success_rate):.1f}%)")
         logger.info(f"전체: {results['total']}개")
         logger.info(f"총 소요 시간: {elapsed:.2f}초 ({elapsed/60:.2f}분)")
         

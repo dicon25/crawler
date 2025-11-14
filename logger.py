@@ -83,9 +83,13 @@ def log_dict(logger: logging.Logger, data: dict, title: str = "Data", max_length
     """
     logger.debug(f"{title}:")
     for key, value in data.items():
-        value_str = str(value)
-        if len(value_str) > max_length:
-            value_str = value_str[:max_length] + "..."
+        # thumbnail base64는 축약 표시
+        if key == 'thumbnail' and isinstance(value, str) and len(value) > 50:
+            value_str = "base64..."
+        else:
+            value_str = str(value)
+            if len(value_str) > max_length:
+                value_str = value_str[:max_length] + "..."
         logger.debug(f"  {key}: {value_str}")
 
 

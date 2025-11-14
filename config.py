@@ -42,6 +42,11 @@ BACKEND_TIMEOUT = int(os.getenv("BACKEND_TIMEOUT", "60"))
 # Rate Limiting
 REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "1.0"))
 
+# ArXiv API Rate Limiting
+ARXIV_MAX_RETRIES = int(os.getenv("ARXIV_MAX_RETRIES", "5"))
+ARXIV_INITIAL_DELAY = float(os.getenv("ARXIV_INITIAL_DELAY", "3.0"))
+ARXIV_CLIENT_DELAY = float(os.getenv("ARXIV_CLIENT_DELAY", "3.0"))
+
 
 # 환경변수 검증
 def validate_config():

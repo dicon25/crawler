@@ -2,11 +2,23 @@
 ArXiv 논문 가져오기 모듈
 """
 
+import re
+import time
 from typing import Dict, List
 
 import arxiv
 
-from config import ARXIV_QUERY, MAX_RESULTS_LATEST, MAX_RESULTS_SCHEDULED
+from config import (
+    ARXIV_QUERY, 
+    MAX_RESULTS_LATEST, 
+    MAX_RESULTS_SCHEDULED,
+    ARXIV_MAX_RETRIES,
+    ARXIV_INITIAL_DELAY,
+    ARXIV_CLIENT_DELAY
+)
+from logger import setup_logger
+
+logger = setup_logger("arxiv_fetcher")
 
 
 # ArXiv 카테고리 코드를 사람이 읽을 수 있는 이름으로 매핑
@@ -166,21 +178,29 @@ def fetch_arxiv_papers(
     query: str = ARXIV_QUERY,
     max_results: int = 100,
     sort_by: arxiv.SortCriterion = arxiv.SortCriterion.SubmittedDate,
-    sort_order: arxiv.SortOrder = arxiv.SortOrder.Descending
+    sort_order: arxiv.SortOrder = arxiv.SortOrder.Descending,
+    max_retries: int = ARXIV_MAX_RETRIES,
+    initial_delay: float = ARXIV_INITIAL_DELAY
 ) -> List[arxiv.Result]:
     """
-    ArXiv에서 논문 목록 가져오기
+    ArXiv에서 논문 목록 가져오기 (재시도 로직 포함)
     
     Args:
         query: 검색 쿼리
         max_results: 가져올 최대 논문 수
         sort_by: 정렬 기준
         sort_order: 정렬 순서
+        max_retries: 최대 재시도 횟수
+        initial_delay: 초기 재시도 지연 시간 (초)
     
     Returns:
         ArXiv Result 객체 리스트
+    
+    Raises:
+        arxiv.HTTPError: 모든 재시도 실패 시
     """
     print(f"ArXiv에서 논문 검색 중... (쿼리: {query})")
+    logger.info(f"ArXiv 검색 시작 - 쿼리: {query}, max_results: {max_results}")
     
     search = arxiv.Search(
         query=query,
@@ -189,11 +209,79 @@ def fetch_arxiv_papers(
         sort_order=sort_order
     )
     
-    client = arxiv.Client()
-    results = list(client.results(search))
+    # ArXiv Client 설정 (Rate limiting 고려)
+    client = arxiv.Client(
+        page_size=100,
+        delay_seconds=ARXIV_CLIENT_DELAY,  # 기본 딜레이
+        num_retries=3
+    )
     
-    print(f"논문 {len(results)}개 발견")
-    return results
+    last_exception = None
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"ArXiv API 요청 시도 {attempt + 1}/{max_retries}")
+            results = list(client.results(search))
+            
+            logger.info(f"ArXiv 검색 성공 - 논문 {len(results)}개 발견")
+            print(f"논문 {len(results)}개 발견")
+            return results
+            
+        except arxiv.HTTPError as e:
+            last_exception = e
+            
+            # 상태 코드 추출 (속성 또는 에러 메시지에서)
+            status_code = None
+            if hasattr(e, 'status_code'):
+                status_code = e.status_code
+            else:
+                # 에러 메시지에서 HTTP 상태 코드 파싱
+                error_msg = str(e)
+                match = re.search(r'HTTP (\d+)', error_msg)
+                if match:
+                    status_code = int(match.group(1))
+            
+            # HTTP 429 (Too Many Requests) 오류인 경우
+            if status_code == 429:
+                if attempt < max_retries - 1:
+                    # 지수 백오프: 3초, 6초, 12초, 24초, 48초
+                    delay = initial_delay * (2 ** attempt)
+                    logger.warning(
+                        f"HTTP 429 오류 발생 (시도 {attempt + 1}/{max_retries}). "
+                        f"{delay:.1f}초 후 재시도합니다..."
+                    )
+                    print(f"  ⚠ Rate limit 도달. {delay:.1f}초 후 재시도...")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"모든 재시도 실패. HTTP 429 오류가 계속 발생합니다.")
+                    print(f"  ✗ Rate limit 오류가 계속 발생합니다.")
+            else:
+                # 다른 HTTP 오류인 경우
+                status_str = f"HTTP {status_code}" if status_code else "알 수 없는 HTTP 오류"
+                logger.error(f"{status_str} 발생")
+                if attempt < max_retries - 1:
+                    delay = initial_delay * (2 ** attempt)
+                    logger.warning(f"{delay:.1f}초 후 재시도합니다...")
+                    time.sleep(delay)
+                else:
+                    raise
+        
+        except Exception as e:
+            last_exception = e
+            logger.error(f"예상치 못한 오류 발생: {e}", exc_info=True)
+            if attempt < max_retries - 1:
+                delay = initial_delay * (2 ** attempt)
+                logger.warning(f"{delay:.1f}초 후 재시도합니다...")
+                time.sleep(delay)
+            else:
+                raise
+    
+    # 모든 재시도 실패
+    if last_exception:
+        logger.critical("모든 재시도 실패. ArXiv API 요청을 중단합니다.")
+        raise last_exception
+    
+    return []
 
 
 def fetch_latest_papers(max_results: int = MAX_RESULTS_LATEST) -> List[arxiv.Result]:

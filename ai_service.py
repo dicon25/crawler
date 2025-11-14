@@ -67,10 +67,20 @@ def process_ai_response(ai_response: Dict) -> ProcessedAIResponse:
     logger.debug(f"content JSON 생성: {len(processed['content'])} 문자")
     logger.debug(f"content 미리보기: {processed['content'][:200]}...")
     
-    # 3. hashtags 추가
+    # 3. hashtags 추가 (tag 값만 추출하여 string 배열로 변환)
     if 'hashtags' in ai_response and ai_response['hashtags']:
-        processed['hashtags'] = json.dumps(ai_response['hashtags'], ensure_ascii=False)
-        logger.debug(f"hashtags 추가: {len(ai_response['hashtags'])}개")
+        # AI 응답의 hashtags는 배열 형태 [{tag: "...", translatedTag: "..."}, ...]
+        if isinstance(ai_response['hashtags'], list):
+            # tag 값만 추출하여 string 배열로 변환
+            tag_list = [item.get('tag', '') for item in ai_response['hashtags'] if isinstance(item, dict) and 'tag' in item]
+            # string 배열을 JSON 문자열로 저장 (백엔드에서 파싱할 수 있도록)
+            processed['hashtags'] = json.dumps(tag_list, ensure_ascii=False)
+            logger.debug(f"hashtags 추가: {len(tag_list)}개 (tag 값만 추출 → string 배열 → JSON 문자열)")
+            logger.debug(f"hashtags 샘플: {tag_list[:5]}")
+        else:
+            # 이미 문자열이거나 다른 형태인 경우
+            processed['hashtags'] = json.dumps(ai_response['hashtags'], ensure_ascii=False) if not isinstance(ai_response['hashtags'], str) else ai_response['hashtags']
+            logger.debug(f"hashtags 추가: {type(ai_response['hashtags'])} 타입")
     else:
         logger.warning("AI 응답에 'hashtags' 없음 또는 비어있음")
     
@@ -179,17 +189,29 @@ def summarize_paper_with_ai(pdf_content: bytes, activities: List[Dict], paper_id
         
         response.raise_for_status()
         
-        # 원본 응답 출력
+        # 원본 응답 출력 (thumbnail base64는 축약)
+        ai_response = response.json()
+        
+        # thumbnail이 있으면 축약된 버전으로 출력
+        response_for_log = response.text
+        if 'thumbnail' in ai_response and ai_response['thumbnail']:
+            # JSON에서 thumbnail을 "base64..."로 대체
+            response_dict = json.loads(response.text)
+            if 'thumbnail' in response_dict:
+                response_dict['thumbnail'] = "base64..."
+                response_for_log = json.dumps(response_dict, ensure_ascii=False, indent=2)
+        
         logger.info("=" * 80)
         logger.info("AI 서버 원본 응답:")
-        logger.info(response.text)
+        logger.info(response_for_log)
         logger.info("=" * 80)
         
-        ai_response = response.json()
         logger.debug(f"응답 키: {list(ai_response.keys())}")
         
         print("성공")
-        print(f"  → AI 서버 응답: {response.text[:200]}..." if len(response.text) > 200 else f"  → AI 서버 응답: {response.text}")
+        # 응답 출력 시에도 thumbnail 축약
+        response_preview = response_for_log[:200] if len(response_for_log) > 200 else response_for_log
+        print(f"  → AI 서버 응답: {response_preview}...")
         
         # AI 응답 상세 로깅
         if 'summary' in ai_response:
